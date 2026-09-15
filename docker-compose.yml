@@ -3,6 +3,9 @@ services:
     # Built automatically by GitHub Actions on every push to main.
     image: ghcr.io/dhrandy/bambu-bridge:latest
     container_name: bambu-bridge
+    # Picks up the variables from Dockhand's Environment tab (its .env file).
+    env_file:
+      - .env
     # Put these in Dockhand's Environment tab (not a .env file):
     #   BAMBU_EMAIL=you@example.com
     #   BAMBU_PASSWORD=your-bambu-account-password
