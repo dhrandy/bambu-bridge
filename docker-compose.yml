@@ -3,18 +3,19 @@ services:
     # Built automatically by GitHub Actions on every push to main.
     image: ghcr.io/dhrandy/bambu-bridge:latest
     container_name: bambu-bridge
-    # Picks up the variables from Dockhand's Environment tab (its .env file).
-    env_file:
-      - .env
-    # Put these in Dockhand's Environment tab (not a .env file):
-    #   BAMBU_EMAIL=you@example.com
-    #   BAMBU_PASSWORD=your-bambu-account-password
-    #   BAMBU_SERIAL= (leave empty unless you have more than one printer)
-    #   API_KEY= (long random string you invent; also saved in the vault)
+    # Secrets live in Dockhand's Environment tab (its .env file). The
+    # ${VAR} references below are interpolated from there at deploy time.
+    # (env_file did not work on CasaOS, so interpolation is used instead.
+    # Never put raw secret values in this file.)
     environment:
       - BAMBU_REGION=us
       - BAMBU_DEVICE_TYPE=A1
       - PORT=8080
+      - BAMBU_EMAIL=${BAMBU_EMAIL}
+      - BAMBU_PASSWORD=${BAMBU_PASSWORD}
+      - API_KEY=${API_KEY}
+      # Only needed with more than one printer on the account; empty = auto-detect.
+      - BAMBU_SERIAL=${BAMBU_SERIAL}
     ports:
       # Bound to localhost; Cloudflare Tunnel fronts it. Do not publish to LAN.
       - "127.0.0.1:28550:8080"
