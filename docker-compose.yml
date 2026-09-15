@@ -14,5 +14,5 @@ services:
       - PORT=8080
     ports:
       # Bound to localhost; Cloudflare Tunnel fronts it. Do not publish to LAN.
-      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:28550:8080"
     restart: unless-stopped
