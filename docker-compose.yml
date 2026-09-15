@@ -1,0 +1,18 @@
+services:
+  bambu-bridge:
+    # Built automatically by GitHub Actions on every push to main.
+    image: ghcr.io/dhrandy/bambu-bridge:latest
+    container_name: bambu-bridge
+    # Put these in Dockhand's Environment tab (not a .env file):
+    #   BAMBU_EMAIL=you@example.com
+    #   BAMBU_PASSWORD=your-bambu-account-password
+    #   BAMBU_SERIAL= (leave empty unless you have more than one printer)
+    #   API_KEY= (long random string you invent; also saved in the vault)
+    environment:
+      - BAMBU_REGION=us
+      - BAMBU_DEVICE_TYPE=A1
+      - PORT=8080
+    ports:
+      # Bound to localhost; Cloudflare Tunnel fronts it. Do not publish to LAN.
+      - "127.0.0.1:8080:8080"
+    restart: unless-stopped
