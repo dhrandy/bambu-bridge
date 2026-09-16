@@ -18,6 +18,7 @@ import asyncio
 import hmac
 import json
 import logging
+import threading
 import os
 import sys
 import time
@@ -183,8 +184,13 @@ class Handler(BaseHTTPRequestHandler):
 
 def main():
     loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    loop.create_task(supervise())
+
+    def _run_loop():
+        asyncio.set_event_loop(loop)
+        loop.run_forever()
+
+    threading.Thread(target=_run_loop, daemon=True, name="bambu-loop").start()
+    asyncio.run_coroutine_threadsafe(supervise(), loop)
     server = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
     log.info("bambu-bridge listening on :%d", PORT)
     try:
