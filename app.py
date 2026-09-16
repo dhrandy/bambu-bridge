@@ -116,9 +116,12 @@ async def supervise():
     while True:
         client = None
         try:
-            client = build_client()
+            log.info("supervisor: logging into Bambu Cloud...")
+            client = await asyncio.wait_for(
+                asyncio.to_thread(build_client), timeout=120
+            )
             state["client"] = client
-            await client.connect(on_event)
+            await asyncio.wait_for(client.connect(on_event), timeout=120)
             log.info("MQTT connected, serving status")
             await asyncio.sleep(24 * 3600)
             log.info("Scheduled rebuild for token freshness")
@@ -192,7 +195,7 @@ def main():
     threading.Thread(target=_run_loop, daemon=True, name="bambu-loop").start()
     asyncio.run_coroutine_threadsafe(supervise(), loop)
     server = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
-    log.info("bambu-bridge listening on :%d", PORT)
+    log.info("bambu-bridge v2 listening on :%d", PORT)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
