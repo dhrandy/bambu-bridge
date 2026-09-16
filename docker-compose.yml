@@ -17,8 +17,9 @@ services:
       # Only needed with more than one printer on the account; empty = auto-detect.
       - BAMBU_SERIAL=${BAMBU_SERIAL}
     ports:
-      # Bound to localhost; Cloudflare Tunnel fronts it. Do not publish to LAN.
-      - "127.0.0.1:28550:8080"
+      # Plain mapping; binding to 127.0.0.1 caused reverse-proxy 502 errors.
+      # Cloudflare Tunnel fronts it. Do not publish to LAN.
+      - "28550:8080"
     volumes:
       # Persists the Bambu login session so redeploys and restarts don't
       # need a fresh email verification code. Add the same volume to the
