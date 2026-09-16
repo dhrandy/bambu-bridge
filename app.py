@@ -10,6 +10,7 @@ Endpoints (all key-gated except /health):
   GET /health  -> {"ok": true}
   GET /status  -> {"state","progress_pct","remaining_min","file",
                    "nozzle_c","bed_c","data_age_s"}
+  POST /verify -> {"code": "123456"} completes an email-verification login
 
 Auth: send your API_KEY as the X-Api-Key header.
 """
@@ -54,7 +55,8 @@ DEVICE_TYPE = os.environ.get("BAMBU_DEVICE_TYPE", "A1")
 API_KEY = os.environ["API_KEY"]
 PORT = int(os.environ.get("PORT", "8080"))
 
-state = {"client": None, "last_update": 0.0}
+state = {"client": None, "last_update": 0.0, "generation": 0}
+_event_loop = None  # set in main(); do_POST uses it to run verify on the loop
 
 
 def on_event(_event: str):
@@ -81,21 +83,7 @@ def pick_serial(cloud: BambuCloud) -> str:
     )
 
 
-def build_client() -> BambuClient:
-    cloud = BambuCloud(region="", email="", username="", auth_token="")
-    try:
-        cloud.login(REGION, EMAIL, PASSWORD)
-    except CodeRequiredError:
-        raise RuntimeError(
-            "Bambu wants an email verification code. Sign into the Bambu Handy "
-            "app once, then restart this container."
-        )
-    except TfaCodeRequiredError:
-        raise RuntimeError(
-            "This Bambu account has 2FA enabled, so the bridge can't re-login "
-            "on its own. Disable 2FA on the Bambu account or expect to "
-            "re-auth by hand every few months."
-        )
+def build_client_from_cloud(cloud: BambuCloud) -> BambuClient:
     serial = pick_serial(cloud)
     config = {
         "host": "",
@@ -111,10 +99,55 @@ def build_client() -> BambuClient:
     return BambuClient(config)
 
 
+def build_client() -> BambuClient:
+    cloud = BambuCloud(region="", email="", username="", auth_token="")
+    try:
+        cloud.login(REGION, EMAIL, PASSWORD)
+    except CodeRequiredError:
+        raise RuntimeError(
+            "Bambu wants an email verification code. POST it to /verify "
+            "as {\"code\": \"123456\"}."
+        )
+    except TfaCodeRequiredError:
+        raise RuntimeError(
+            "This Bambu account has 2FA enabled, so the bridge can't re-login "
+            "on its own. Disable 2FA on the Bambu account or expect to "
+            "re-auth by hand every few months."
+        )
+    return build_client_from_cloud(cloud)
+
+
+def do_code_login(code: str) -> BambuCloud:
+    """Complete the email-verification login Bambu demanded (blocking)."""
+    cloud = BambuCloud(
+        region=REGION, email=EMAIL, username="", auth_token=""
+    )
+    cloud.login_with_verification_code(code)
+    return cloud
+
+
+async def verify_and_connect(code: str) -> None:
+    """Log in with a user-supplied verification code and go live."""
+    cloud = await asyncio.to_thread(do_code_login, code)
+    client = await asyncio.to_thread(build_client_from_cloud, cloud)
+    await asyncio.wait_for(client.connect(on_event), timeout=120)
+    old = state["client"]
+    state["client"] = client
+    state["generation"] += 1
+    state["last_update"] = time.time()
+    if old is not None:
+        try:
+            old.disconnect()
+        except Exception:  # noqa: BLE001, S110
+            pass
+    log.info("Verified via code; MQTT connected, serving status")
+
+
 async def supervise():
     """Keep one MQTT client alive; rebuild it daily so the token stays fresh."""
     while True:
         client = None
+        gen = state["generation"]
         try:
             log.info("supervisor: logging into Bambu Cloud...")
             client = await asyncio.wait_for(
@@ -126,10 +159,18 @@ async def supervise():
             await asyncio.sleep(24 * 3600)
             log.info("Scheduled rebuild for token freshness")
         except Exception as e:  # noqa: BLE001 - must never die
-            log.error("client error: %s; retrying in 60s", e)
-            await asyncio.sleep(60)
+            if state["client"] is not None:
+                # A /verify login has us covered; retry quietly once an hour
+                # in case password login starts working again.
+                log.info("login still needs a code; keeping verified client")
+                await asyncio.sleep(3600)
+            else:
+                log.error("client error: %s; retrying in 60s", e)
+                await asyncio.sleep(60)
         finally:
-            state["client"] = None
+            # Don't clobber a client installed by /verify after we sampled gen.
+            if state["generation"] == gen:
+                state["client"] = None
             if client is not None:
                 try:
                     client.disconnect()
@@ -181,12 +222,36 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(502, {"error": f"read failed: {e}"})
         return self._send(200, payload)
 
+    def do_POST(self):  # noqa: N802
+        if self.path != "/verify":
+            return self._send(404, {"error": "not found"})
+        if not self._authorized():
+            return self._send(401, {"error": "unauthorized"})
+        length = int(self.headers.get("Content-Length", 0) or 0)
+        try:
+            body = json.loads(self.rfile.read(length) or b"{}")
+        except Exception:  # noqa: BLE001
+            return self._send(400, {"error": "bad json"})
+        code = str(body.get("code", "")).strip()
+        if not code:
+            return self._send(400, {"error": "missing code"})
+        try:
+            fut = asyncio.run_coroutine_threadsafe(
+                verify_and_connect(code), _event_loop
+            )
+            fut.result(timeout=150)
+        except Exception as e:  # noqa: BLE001
+            return self._send(502, {"error": str(e)[:200]})
+        return self._send(200, {"ok": True})
+
     def log_message(self, fmt, *args):
         log.info("%s - %s", self.address_string(), fmt % args)
 
 
 def main():
+    global _event_loop
     loop = asyncio.new_event_loop()
+    _event_loop = loop
 
     def _run_loop():
         asyncio.set_event_loop(loop)
