@@ -12,6 +12,9 @@ RUN git clone --depth 1 https://github.com/greghesp/ha-bambulab.git
 
 COPY app.py .
 
+ARG BUILD_NUMBER=dev
+ENV BUILD_NUMBER=${BUILD_NUMBER}
+
 RUN pip install --no-cache-dir \
     paho-mqtt \
     requests \
