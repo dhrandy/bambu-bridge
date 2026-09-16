@@ -54,6 +54,7 @@ SERIAL = os.environ.get("BAMBU_SERIAL", "").strip()
 DEVICE_TYPE = os.environ.get("BAMBU_DEVICE_TYPE", "A1")
 API_KEY = os.environ["API_KEY"]
 PORT = int(os.environ.get("PORT", "8080"))
+BUILD_NUMBER = os.environ.get("BUILD_NUMBER", "dev")
 
 state = {"client": None, "last_update": 0.0, "generation": 0}
 _event_loop = None  # set in main(); do_POST uses it to run verify on the loop
@@ -275,7 +276,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):  # noqa: N802
         if self.path == "/health":
-            return self._send(200, {"ok": True})
+            return self._send(200, {"ok": True, "build": BUILD_NUMBER})
         if self.path != "/status":
             return self._send(404, {"error": "not found"})
         if not self._authorized():
@@ -341,7 +342,7 @@ def main():
     threading.Thread(target=_run_loop, daemon=True, name="bambu-loop").start()
     asyncio.run_coroutine_threadsafe(supervise(), loop)
     server = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
-    log.info("bambu-bridge v3 listening on :%d", PORT)
+    log.info("bambu-bridge v3 (build %s) listening on :%d", BUILD_NUMBER, PORT)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
