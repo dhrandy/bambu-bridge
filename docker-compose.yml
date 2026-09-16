@@ -19,4 +19,12 @@ services:
     ports:
       # Bound to localhost; Cloudflare Tunnel fronts it. Do not publish to LAN.
       - "127.0.0.1:28550:8080"
+    volumes:
+      # Persists the Bambu login session so redeploys and restarts don't
+      # need a fresh email verification code. Add the same volume to the
+      # Dockhand compose.
+      - bambu-bridge-data:/data
     restart: unless-stopped
+
+volumes:
+  bambu-bridge-data:
