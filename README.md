@@ -5,11 +5,16 @@ answers one question over HTTP: **how's my print?**
 
 Your Bambu email/password live only in Dockhand's Environment tab for this
 stack. Nothing with your credentials ever leaves the NAS. The outside world
-only sees a key-gated `GET /status` behind your Cloudflare Tunnel.
+only sees a key-gated API behind your Cloudflare Tunnel.
 
-## What it reports
+## Endpoints
 
-`GET /status` (header `X-Api-Key: <your key>`):
+All endpoints are key-gated via the header `X-Api-Key: <your-key>`,
+except `/health`.
+
+`GET /health` -> `{"ok": true}` (unauthenticated, for tunnel checks)
+
+`GET /status` -> current printer state:
 
 ```json
 {
@@ -24,7 +29,26 @@ only sees a key-gated `GET /status` behind your Cloudflare Tunnel.
 ```
 
 `state` is the printer's gcode state: `RUNNING`, `PAUSE`, `FINISH`, `IDLE`,
-`FAILED`, etc. `GET /health` is unauthenticated for tunnel checks.
+`FAILED`, etc.
+
+`data_age_s` is seconds since the last MQTT update arrived from the printer.
+The bridge is push-based (no polling): the printer only sends data when
+something changes. When the printer is off or unreachable, this number just
+grows. Treat anything over ~120s as stale.
+
+Error responses on `/status`:
+
+- `401 {"error": "unauthorized"}`: wrong or missing API key.
+- `503 {"error": "printer client not connected"}`: the bridge isn't logged
+  into Bambu Cloud. Check the logs; if Bambu is asking for a verification
+  code, use `/verify` below.
+- `502 {"error": "read failed: ..."}`: connected, but reading the printer
+  state failed.
+
+`POST /verify` with JSON body `{"code": "123456"}`: completes the
+email-verification login when Bambu gates the account behind a code. Codes
+expire fast, so submit the freshest one you have. A successful verify saves
+the session to `/data/session.json` and connects immediately.
 
 ## Setup
 
@@ -45,7 +69,8 @@ only sees a key-gated `GET /status` behind your Cloudflare Tunnel.
      settings.
    - `API_KEY`: invent a long random string. You'll also save this in the
      assistant's secure vault, so keep it handy.
-4. Deploy. Check the logs for `MQTT connected, serving status`.
+4. Deploy. Check the logs for `bambu-bridge v3 listening on :8080` and
+   `MQTT connected, serving status`.
 5. Add a Cloudflare Tunnel ingress, e.g.
    `bambu-bridge.<your-domain>` -> `http://localhost:8080`
    (use `http://bambu-bridge:8080` if cloudflared runs in Docker on the
@@ -54,11 +79,40 @@ only sees a key-gated `GET /status` behind your Cloudflare Tunnel.
 7. Tell your assistant the public URL. It will store the API key in its
    vault and wire up `bambu status` from there.
 
+## Login and verification
+
+Bambu sometimes gates a login behind an email verification code. When that
+happens:
+
+1. The bridge logs the demand and backs off to one login retry per hour.
+   Don't hammer it; repeated attempts get the address throttled and the
+   code emails stop arriving for a while.
+2. Grab the freshest code from your email and POST it to `/verify`:
+   `curl -H "X-Api-Key: <key>" -H "Content-Type: application/json" -d '{"code":"123456"}' https://bambu-bridge.<your-domain>/verify`
+3. A `{"ok": true}` response means the session is saved and the bridge is
+   connected. No restart needed.
+
+## Session persistence
+
+The login session lives at `/data/session.json` inside the container, on
+the named volume `bambu-bridge-data`. Restarts, image updates, and
+redeploys reuse it, so you only need a verification code again if the
+session actually expires. If you ever need to force a fresh login, delete
+the volume and redeploy.
+
+## Updating the image
+
+Dockhand workflow: stop the container, pull the image, start the container.
+No image or container deletion needed. The session volume keeps you logged
+in across updates.
+
 ## Notes
 
 - The bridge re-logs-in and rebuilds its MQTT connection daily, so the
   Bambu token (expires after ~3 months) never goes stale silently.
 - Read-only by design: it never sends commands to the printer.
+- Ports are published as `28550:8080`. Binding to `127.0.0.1` caused
+  reverse-proxy 502 errors in this setup, so the plain mapping is used.
 - Uses `pybambu` vendored from
   [greghesp/ha-bambulab](https://github.com/greghesp/ha-bambulab)
   (the standalone PyPI `pybambu` package is stale).
