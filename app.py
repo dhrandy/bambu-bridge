@@ -210,7 +210,7 @@ class Handler(BaseHTTPRequestHandler):
                 "progress_pct": pj.print_percentage,
                 "remaining_min": pj.remaining_time,
                 "file": pj.subtask_name,
-                "nozzle_c": round(temp.active_nozzle_temperature(), 1),
+                "nozzle_c": round(temp.active_nozzle_temperature, 1),
                 "bed_c": round(temp.bed_temp, 1),
                 "data_age_s": (
                     round(time.time() - state["last_update"], 1)
