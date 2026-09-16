@@ -106,6 +106,21 @@ Dockhand workflow: stop the container, pull the image, start the container.
 No image or container deletion needed. The session volume keeps you logged
 in across updates.
 
+## Image tags
+
+Every push to `main` publishes three tags:
+
+- `latest`: the newest build (what Dockhand pulls).
+- `build-<run number>`: immutable tag for that exact build, e.g.
+  `build-45`. Use it to pin a known-good build.
+- `<git sha>`: immutable tag for the exact commit.
+
+The build number is baked in at build time and reported two ways, so you
+can always confirm which build is actually running:
+
+- Container logs: `bambu-bridge v3 (build 45) listening on :8080`
+- `GET /health` returns `{"ok": true, "build": "45"}`
+
 ## Notes
 
 - The bridge re-logs-in and rebuilds its MQTT connection daily, so the
