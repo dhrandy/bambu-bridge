@@ -58,6 +58,52 @@ PORT = int(os.environ.get("PORT", "8080"))
 state = {"client": None, "last_update": 0.0, "generation": 0}
 _event_loop = None  # set in main(); do_POST uses it to run verify on the loop
 
+DATA_DIR = os.environ.get("DATA_DIR", "/data")
+SESSION_FILE = os.path.join(DATA_DIR, "session.json")
+
+
+class CodeRequired(RuntimeError):
+    """Bambu gated this login behind an email verification code."""
+
+
+def save_session(cloud: BambuCloud) -> None:
+    """Persist the auth token so restarts/redeploys skip re-login."""
+    try:
+        os.makedirs(DATA_DIR, exist_ok=True)
+        tmp = SESSION_FILE + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(
+                {
+                    "username": cloud.username,
+                    "auth_token": cloud.auth_token,
+                },
+                f,
+            )
+        os.replace(tmp, SESSION_FILE)
+        log.info("Saved Bambu session to %s", SESSION_FILE)
+    except Exception as e:  # noqa: BLE001
+        log.warning("Could not save session: %s", e)
+
+
+def load_session_cloud() -> "BambuCloud | None":
+    try:
+        with open(SESSION_FILE) as f:
+            data = json.load(f)
+    except FileNotFoundError:
+        return None
+    except Exception as e:  # noqa: BLE001
+        log.warning("Could not read session file: %s", e)
+        return None
+    token = data.get("auth_token", "")
+    if not token:
+        return None
+    return BambuCloud(
+        region=REGION,
+        email=EMAIL,
+        username=data.get("username", ""),
+        auth_token=token,
+    )
+
 
 def on_event(_event: str):
     state["last_update"] = time.time()
@@ -104,9 +150,9 @@ def build_client() -> BambuClient:
     try:
         cloud.login(REGION, EMAIL, PASSWORD)
     except CodeRequiredError:
-        raise RuntimeError(
+        raise CodeRequired(
             "Bambu wants an email verification code. POST it to /verify "
-            "as {\"code\": \"123456\"}."
+            'as {"code": "123456"}.'
         )
     except TfaCodeRequiredError:
         raise RuntimeError(
@@ -114,7 +160,35 @@ def build_client() -> BambuClient:
             "on its own. Disable 2FA on the Bambu account or expect to "
             "re-auth by hand every few months."
         )
+    save_session(cloud)
     return build_client_from_cloud(cloud)
+
+
+def build_client_from_session() -> "BambuClient | None":
+    """Reuse the saved session token when it's still valid."""
+    cloud = load_session_cloud()
+    if cloud is None:
+        return None
+    try:
+        ok = cloud.test_authentication(
+            REGION, EMAIL, cloud.username, cloud.auth_token
+        )
+    except Exception as e:  # noqa: BLE001
+        log.info("Saved session check failed (%s); will re-login", e)
+        return None
+    if not ok:
+        log.info("Saved session expired; will re-login")
+        return None
+    log.info("Reusing saved Bambu session")
+    return build_client_from_cloud(cloud)
+
+
+def build_client_with_session() -> BambuClient:
+    """Prefer the saved session; fall back to a password login."""
+    client = build_client_from_session()
+    if client is not None:
+        return client
+    return build_client()
 
 
 def do_code_login(code: str) -> BambuCloud:
@@ -129,6 +203,7 @@ def do_code_login(code: str) -> BambuCloud:
 async def verify_and_connect(code: str) -> None:
     """Log in with a user-supplied verification code and go live."""
     cloud = await asyncio.to_thread(do_code_login, code)
+    save_session(cloud)
     client = await asyncio.to_thread(build_client_from_cloud, cloud)
     await asyncio.wait_for(client.connect(on_event), timeout=120)
     old = state["client"]
@@ -151,13 +226,19 @@ async def supervise():
         try:
             log.info("supervisor: logging into Bambu Cloud...")
             client = await asyncio.wait_for(
-                asyncio.to_thread(build_client), timeout=120
+                asyncio.to_thread(build_client_with_session), timeout=120
             )
             state["client"] = client
             await asyncio.wait_for(client.connect(on_event), timeout=120)
             log.info("MQTT connected, serving status")
             await asyncio.sleep(24 * 3600)
             log.info("Scheduled rebuild for token freshness")
+        except CodeRequired as e:
+            # Bambu gated the login behind an email code. Retrying fast just
+            # hammers their login endpoint and extends any throttling, so
+            # back off hard. POSTing a code to /verify still works anytime.
+            log.error("client error: %s; retrying in 60 min", e)
+            await asyncio.sleep(3600)
         except Exception as e:  # noqa: BLE001 - must never die
             if state["client"] is not None:
                 # A /verify login has us covered; retry quietly once an hour
@@ -260,7 +341,7 @@ def main():
     threading.Thread(target=_run_loop, daemon=True, name="bambu-loop").start()
     asyncio.run_coroutine_threadsafe(supervise(), loop)
     server = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
-    log.info("bambu-bridge v2 listening on :%d", PORT)
+    log.info("bambu-bridge v3 listening on :%d", PORT)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
