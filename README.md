@@ -131,3 +131,16 @@ can always confirm which build is actually running:
 - Uses `pybambu` vendored from
   [greghesp/ha-bambulab](https://github.com/greghesp/ha-bambulab)
   (the standalone PyPI `pybambu` package is stale).
+
+## Agent skill
+
+The `skill/` folder is a drop-in skill for AI agents (SKILL.md format). It
+gives an agent a live one-line read on the printer through this bridge:
+
+    export BAMBU_BRIDGE_URL="https://your-bridge-host"
+    export BAMBU_BRIDGE_API_KEY="your-key-here"
+    ./skill/bambu status
+
+Also usable: `./skill/bambu status --json` for raw output, `./skill/bambu
+health` for a health check. The skill is read-only; the bridge cannot pause
+or cancel prints.
