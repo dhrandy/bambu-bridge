@@ -59,16 +59,20 @@ the session to `/data/session.json` and connects immediately.
    builds the image and publishes it to
    `ghcr.io/dhrandy/bambu-bridge:latest`. Wait for the green check under
    the repo's Actions tab.
-3. In Dockhand, create a new stack, paste in `docker-compose.yml`, and add
-   these in the **Environment** tab:
+3. Set the environment variables the compose file needs. Two ways:
+   - **Dockhand:** create a new stack, paste in `docker-compose.yml`, and
+     add these in the **Environment** tab.
+   - **Plain docker compose:** create a `.env` file next to
+     `docker-compose.yml` with these values (compose interpolates
+     ${VAR} from it automatically).
    - `BAMBU_EMAIL` / `BAMBU_PASSWORD`: your Bambu Lab account. If the
      account has 2FA on, the bridge can't re-login by itself, so prefer an
      account without 2FA or expect a manual nudge every few months.
    - `BAMBU_SERIAL`: leave empty if this account has exactly one printer
      (it auto-detects). Otherwise find it in Bambu Handy under device
      settings.
-   - `API_KEY`: invent a long random string. You'll also save this in the
-     assistant's secure vault, so keep it handy.
+   - `API_KEY`: invent a long random string. Keep it handy, you'll give it
+     to your AI agent so it can query the bridge.
 4. Deploy. Check the logs for `bambu-bridge v3 listening on :8080` and
    `MQTT connected, serving status`.
 5. Add a Cloudflare Tunnel ingress, e.g.
