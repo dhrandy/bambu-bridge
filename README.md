@@ -89,6 +89,8 @@ happens:
    code emails stop arriving for a while.
 2. Grab the freshest code from your email and POST it to `/verify`:
    `curl -H "X-Api-Key: <key>" -H "Content-Type: application/json" -d '{"code":"123456"}' https://bambu-bridge.<your-domain>/verify`
+   Or skip the curl: just give the code to your AI agent (e.g. "verify the
+   bridge with code 123456") and it'll submit it for you.
 3. A `{"ok": true}` response means the session is saved and the bridge is
    connected. No restart needed.
 
