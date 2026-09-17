@@ -1,0 +1,104 @@
+#!/usr/bin/env python3
+"""Query a bambu-bridge for live Bambu Lab print status.
+
+Reads BAMBU_BRIDGE_URL and BAMBU_BRIDGE_API_KEY from the environment.
+
+Usage:
+  bambu status [--json]
+  bambu health
+"""
+import json
+import os
+import sys
+import urllib.request
+import urllib.error
+
+STATE_WORDS = {
+    "RUNNING": "Printing",
+    "PAUSE": "Paused",
+    "FINISH": "Finished",
+    "IDLE": "Idle",
+    "FAILED": "Failed",
+}
+
+
+def base_url():
+    url = os.environ.get("BAMBU_BRIDGE_URL", "").strip().rstrip("/")
+    if not url:
+        print("error: BAMBU_BRIDGE_URL env var is not set "
+              "(e.g. https://your-bridge-host)", file=sys.stderr)
+        sys.exit(2)
+    return url
+
+
+def api_key():
+    key = os.environ.get("BAMBU_BRIDGE_API_KEY", "").strip()
+    if not key:
+        print("error: BAMBU_BRIDGE_API_KEY env var is not set", file=sys.stderr)
+        sys.exit(2)
+    return key
+
+
+def get(path, authed=True):
+    req = urllib.request.Request(base_url() + path)
+    if authed:
+        req.add_header("X-Api-Key", api_key())
+    try:
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            return json.loads(resp.read())
+    except urllib.error.HTTPError as e:
+        print(f"bridge returned HTTP {e.code}", file=sys.stderr)
+        sys.exit(1)
+
+
+def fmt_eta(minutes):
+    if minutes is None:
+        return "?"
+    minutes = int(minutes)
+    if minutes < 60:
+        return f"{minutes} min"
+    return f"{minutes // 60}h {minutes % 60:02d}m"
+
+
+def main():
+    args = sys.argv[1:]
+    if not args or args[0] not in ("status", "health"):
+        print(__doc__.strip(), file=sys.stderr)
+        return 2
+    try:
+        if args[0] == "health":
+            data = get("/health", authed=False)
+            print("bridge ok" if data.get("ok") else f"bridge says: {data}")
+            return 0
+        data = get("/status")
+    except Exception as e:  # noqa: BLE001
+        print(f"bridge unreachable: {e}", file=sys.stderr)
+        return 1
+    if "--json" in args:
+        print(json.dumps(data, indent=2))
+        return 0
+    state = data.get("state", "unknown")
+    word = STATE_WORDS.get(state, state.title())
+    if state == "RUNNING":
+        print(
+            f"Printing: {data.get('file') or 'unknown file'} - "
+            f"{data.get('progress_pct')}% done, ~{fmt_eta(data.get('remaining_min'))} left. "
+            f"Nozzle {data.get('nozzle_c')}C, bed {data.get('bed_c')}C."
+        )
+    elif state == "PAUSE":
+        print(f"Print paused: {data.get('file') or 'unknown file'} at {data.get('progress_pct')}%.")
+    elif state == "FINISH":
+        print(f"Finished: {data.get('file') or 'unknown file'}.")
+    elif state == "FAILED":
+        print(f"Print FAILED: {data.get('file') or 'unknown file'}. Check the printer.")
+    elif state == "IDLE":
+        print("Printer is idle.")
+    else:
+        print(f"Printer state: {word}.")
+    age = data.get("data_age_s")
+    if age is not None and age > 120:
+        print(f"(printer data is {int(age)}s old, it may be offline)")
+
+
+if __name__ == "__main__":
+    sys.exit(main())
