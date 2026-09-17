@@ -3,6 +3,9 @@
 Tiny service that watches your Bambu Lab printer through Bambu Cloud and
 answers one question over HTTP: **how's my print?**
 
+Setting it up with an AI agent? Just point it at this page. Everything the
+agent needs, setup, verification, and troubleshooting, is documented below.
+
 Your Bambu email/password live only in Dockhand's Environment tab for this
 stack. Nothing with your credentials ever leaves the NAS. The outside world
 only sees a key-gated API behind your Cloudflare Tunnel.
